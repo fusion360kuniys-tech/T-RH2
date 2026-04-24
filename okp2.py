@@ -19,8 +19,14 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- データベース操作関数 ---
 def save_to_supabase(t, h):
-    """データをSupabaseに挿入"""
-    data = {"temperature": t, "humidity": h}
+    """
+    カラム名がすべて小文字であることを確認してください。
+    SQLで 'temperature' と作ったなら、ここも 'temperature' です。
+    """
+    data = {
+        "temperature": t,  # ここが 'Temperature' (大文字) になっていませんか？
+        "humidity": h      # ここが 'Humidity' になっていませんか？
+    }
     supabase.table("environment").insert(data).execute()
 
 def fetch_data_from_supabase(limit=30):
