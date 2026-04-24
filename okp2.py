@@ -11,7 +11,7 @@ st.set_page_config(page_title="園芸施設 統合管理 (Supabase版)", layout=
 
 # --- 【重要】機密情報の設定 ---
 # ※本来はStreamlit CloudのSecretsを使うのが安全ですが、ご要望通り直接記述します
-SUPABASE_URL = "https://rmaycprutdkwrfpmuqrk.supabase.co/rest/v1/"
+SUPABASE_URL = "https://rmaycprutdkwrfpmuqrk.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtYXljcHJ1dGRrd3JmcG11cXJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMTcwNzQsImV4cCI6MjA5MjU5MzA3NH0.1gx8b-sIvZpb5Ms2oy5cIqC9LXUQb5bkdlg6CoGgUD8"
 
 # URLやKEYに空白が混じっているとエラーになるので .strip() を推奨
