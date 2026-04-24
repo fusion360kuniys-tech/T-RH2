@@ -14,8 +14,24 @@ st.set_page_config(page_title="園芸施設 統合管理 (Supabase版)", layout=
 SUPABASE_URL = "https://rmaycprutdkwrfpmuqrk.supabase.co/rest/v1/"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtYXljcHJ1dGRrd3JmcG11cXJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMTcwNzQsImV4cCI6MjA5MjU5MzA3NH0.1gx8b-sIvZpb5Ms2oy5cIqC9LXUQb5bkdlg6CoGgUD8"
 
-# Supabaseクライアントの初期化
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# URLやKEYに空白が混じっているとエラーになるので .strip() を推奨
+if SUPABASE_URL == "あなたのURL" or SUPABASE_KEY == "あなたのKEY":
+    st.error("SupabaseのURLまたはKEYが設定されていません。")
+    st.stop()
+
+# Supabaseクライアントの初期化（optionsを明示的に渡す）
+from supabase.lib.client_options import ClientOptions
+
+try:
+    supabase: Client = create_client(
+        SUPABASE_URL.strip(), 
+        SUPABASE_KEY.strip(),
+        options=ClientOptions(postgrest_client_timeout=10)
+    )
+except Exception as e:
+    st.error("Supabaseクライアントの起動に失敗しました。")
+    st.code(str(e))
+    st.stop()
 
 # --- データベース操作関数 ---
 def save_to_supabase(t, h):
