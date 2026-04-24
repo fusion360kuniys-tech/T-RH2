@@ -19,15 +19,17 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- データベース操作関数 ---
 def save_to_supabase(t, h):
-    """
-    カラム名がすべて小文字であることを確認してください。
-    SQLで 'temperature' と作ったなら、ここも 'temperature' です。
-    """
-    data = {
-        "temperature": t,  # ここが 'Temperature' (大文字) になっていませんか？
-        "humidity": h      # ここが 'Humidity' になっていませんか？
-    }
-    supabase.table("environment").insert(data).execute()
+    """エラーの詳細を画面に表示するデバッグ版"""
+    data = {"temperature": t, "humidity": h}
+    try:
+        # execute() の戻り値を確認
+        result = supabase.table("environment").insert(data).execute()
+        return result
+    except Exception as e:
+        # 画面に赤いボックスでエラー内容をすべて表示します
+        st.error(f"⚠️ Supabase接続エラーが発生しました:")
+        st.code(str(e)) # ここに本当の理由が表示されます
+        st.stop() # エラーが出たら一旦止める
 
 def fetch_data_from_supabase(limit=30):
     """最新のデータを取得してPandas DataFrameで返す"""
