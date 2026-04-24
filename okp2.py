@@ -1,141 +1,98 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 import time
 import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
 import random
+from supabase import create_client, Client
 
-# --- ページ設定とカスタムCSS ---
-st.set_page_config(page_title="園芸施設 統合管理システム", layout="wide")
+# --- ページ設定 ---
+st.set_page_config(page_title="園芸施設 統合管理 (Supabase版)", layout="wide")
 
-st.markdown("""
-    <style>
-    [data-testid="stMetricValue"] { font-size: 48px !important; }
-    [data-testid="stMetricLabel"] { font-size: 24px !important; }
-    .alert-box { padding: 20px; border-radius: 10px; color: white; font-weight: bold; font-size: 24px; text-align: center; margin-bottom: 20px; }
-    </style>
-    """, unsafe_allow_html=True)
+# --- 【重要】機密情報の設定 ---
+# ※本来はStreamlit CloudのSecretsを使うのが安全ですが、ご要望通り直接記述します
+SUPABASE_URL = "https://rmaycprutdkwrfpmuqrk.supabase.co/rest/v1/"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtYXljcHJ1dGRrd3JmcG11cXJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMTcwNzQsImV4cCI6MjA5MjU5MzA3NH0.1gx8b-sIvZpb5Ms2oy5cIqC9LXUQb5bkdlg6CoGgUD8"
 
-# --- データベース設定 & クリーンアップ機能 ---
-DB_FILE = "sensor_data.db"
+# Supabaseクライアントの初期化
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS environment 
-                 (timestamp DATETIME, temperature REAL, humidity REAL)''')
-    conn.commit()
-    conn.close()
+# --- データベース操作関数 ---
+def save_to_supabase(t, h):
+    """データをSupabaseに挿入"""
+    data = {"temperature": t, "humidity": h}
+    supabase.table("environment").insert(data).execute()
 
-def save_to_db(t, h):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    c.execute("INSERT INTO environment VALUES (?, ?, ?)", (now, t, h))
-    conn.commit()
-    conn.close()
+def fetch_data_from_supabase(limit=30):
+    """最新のデータを取得してPandas DataFrameで返す"""
+    response = supabase.table("environment") \
+        .select("*") \
+        .order("timestamp", desc=True) \
+        .limit(limit) \
+        .execute()
+    
+    df = pd.DataFrame(response.data)
+    if not df.empty:
+        # 時刻を見やすく整形
+        df['timestamp'] = pd.to_datetime(df['timestamp']).dt.strftime('%H:%M:%S')
+        # グラフ表示用に古い順に並べ替え
+        df = df.sort_values('timestamp')
+    return df
 
-def delete_old_data(days_to_keep):
-    """指定された日数より古いデータを削除する"""
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    # 削除の基準となる日時を計算
-    cutoff_date = (datetime.now() - timedelta(days=days_to_keep)).strftime('%Y-%m-%d %H:%M:%S')
-    c.execute("DELETE FROM environment WHERE timestamp < ?", (cutoff_date,))
-    # データベースファイルのサイズを再最適化
-    c.execute("VACUUM")
-    conn.commit()
-    conn.close()
+def delete_old_data(days):
+    """古いデータを削除"""
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    supabase.table("environment").delete().lt("timestamp", cutoff).execute()
 
-# 起動時にDB初期化
-init_db()
-
-# --- サイドバー：管理設定 ---
+# --- サイドバー設定 ---
 st.sidebar.header("⚙️ システム管理")
-
-# 自動削除の設定
-retention_days = st.sidebar.number_input("データ保持期間 (日間)", min_value=1, max_value=365, value=30)
-if st.sidebar.button("古いデータを今すぐ削除"):
+retention_days = st.sidebar.number_input("データ保持期間 (日間)", 1, 365, 30)
+if st.sidebar.button("古いデータを削除"):
     delete_old_data(retention_days)
-    st.sidebar.success(f"{retention_days}日より前のデータを削除しました。")
-
-# --- サイドバー：CSV保存 ---
-st.sidebar.header("📁 データエクスポート")
-export_date = st.sidebar.date_input("抽出する日付を選択", date.today())
-
-if st.sidebar.button("CSVデータを生成"):
-    conn = sqlite3.connect(DB_FILE)
-    query = f"SELECT * FROM environment WHERE timestamp LIKE '{export_date}%'"
-    export_df = pd.read_sql_query(query, conn)
-    conn.close()
-
-    if not export_df.empty:
-        csv = export_df.to_csv(index=False).encode('utf-8-sig')
-        st.sidebar.download_button(
-            label=f"📥 {export_date} のCSVをダウンロード",
-            data=csv, file_name=f"env_data_{export_date}.csv", mime='text/csv'
-        )
-    else:
-        st.sidebar.warning("選択した日付のデータはありません。")
-
-# --- サイドバー：アラート設定 ---
-st.sidebar.header("📢 アラート設定")
-temp_min, temp_max = st.sidebar.slider("温度範囲 (°C)", 0.0, 50.0, (15.0, 30.0))
-hum_min, hum_max = st.sidebar.slider("湿度範囲 (%)", 0.0, 100.0, (40.0, 80.0))
-alert_logic = st.sidebar.selectbox("アラート条件", ["OR", "AND", "温度のみ", "湿度のみ"])
+    st.sidebar.success("削除完了")
 
 # --- メイン画面 ---
-st.title("🌿 園芸施設 環境モニタリング")
+st.title("🌿 園芸施設 環境モニタリング (Supabase)")
 alert_placeholder = st.empty()
 col1, col2 = st.columns(2)
 placeholder_temp = col1.empty()
 placeholder_hum = col2.empty()
 chart_placeholder = st.empty()
 
-if 'df' not in st.session_state:
-    st.session_state.df = pd.DataFrame(columns=['Time', 'Temperature', 'Humidity'])
+# アラート設定
+st.sidebar.header("📢 アラート設定")
+temp_min, temp_max = st.sidebar.slider("温度範囲", 0.0, 50.0, (15.0, 30.0))
+hum_min, hum_max = st.sidebar.slider("湿度範囲", 0.0, 100.0, (40.0, 80.0))
 
 # --- 実行ループ ---
-count = 0
 while True:
-    # 1. データ取得と保存
+    # 1. 擬似データ生成とSupabase保存
     t = round(random.uniform(10.0, 35.0), 1)
     h = round(random.uniform(30.0, 90.0), 1)
-    save_to_db(t, h)
+    save_to_supabase(t, h)
     
-    # 定期的（ここでは100回に1回）に自動クリーンアップを実行
-    count += 1
-    if count >= 100:
-        delete_old_data(retention_days)
-        count = 0
+    # 2. Supabaseから最新データを取得
+    df_display = fetch_data_from_supabase(30)
 
-    # 2. 表示用データ更新
-    now_full = datetime.now().strftime('%H:%M:%S')
-    new_data = pd.DataFrame({'Time': [now_full], 'Temperature': [t], 'Humidity': [h]})
-    st.session_state.df = pd.concat([st.session_state.df, new_data], ignore_index=True).tail(30)
+    # 3. UI更新
+    if not df_display.empty:
+        latest_t = df_display.iloc[-1]['temperature']
+        latest_h = df_display.iloc[-1]['humidity']
+        
+        placeholder_temp.metric("🌡️ 温度", f"{latest_t} °C")
+        placeholder_hum.metric("💧 湿度", f"{latest_h} %")
 
-    # 3. アラート判定
-    t_alert = (t < temp_min or t > temp_max)
-    h_alert = (h < hum_min or h > hum_max)
-    is_alert = (alert_logic == "OR" and (t_alert or h_alert)) or \
-               (alert_logic == "AND" and (t_alert and h_alert)) or \
-               (alert_logic == "温度のみ" and t_alert) or \
-               (alert_logic == "湿度のみ" and h_alert)
+        # アラート判定
+        is_alert = (latest_t < temp_min or latest_t > temp_max or latest_h < hum_min or latest_h > hum_max)
+        if is_alert:
+            alert_placeholder.error("⚠️ 異常検知")
+        else:
+            alert_placeholder.success("✅ 正常")
 
-    if is_alert:
-        alert_placeholder.markdown('<div class="alert-box" style="background-color: #FF4B4B;">⚠️ 異常検知</div>', unsafe_allow_html=True)
-    else:
-        alert_placeholder.markdown('<div class="alert-box" style="background-color: #28a745;">✅ 正常</div>', unsafe_allow_html=True)
-
-    # 4. UI更新
-    placeholder_temp.metric("🌡️ 温度", f"{t} °C")
-    placeholder_hum.metric("💧 湿度", f"{h} %")
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=st.session_state.df['Time'], y=st.session_state.df['Temperature'], name="温度", line=dict(color='#FF4B4B', width=4)))
-    fig.add_trace(go.Scatter(x=st.session_state.df['Time'], y=st.session_state.df['Humidity'], name="湿度", line=dict(color='#1C83E1', width=4)))
-    fig.update_layout(hovermode="x unified", font=dict(size=18), height=500, margin=dict(l=50, r=50, t=30, b=50))
-    chart_placeholder.plotly_chart(fig, use_container_width=True)
+        # グラフ
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df_display['timestamp'], y=df_display['temperature'], name="温度", line=dict(color='#FF4B4B')))
+        fig.add_trace(go.Scatter(x=df_display['timestamp'], y=df_display['humidity'], name="湿度", line=dict(color='#1C83E1')))
+        chart_placeholder.plotly_chart(fig, use_container_width=True)
     
-    time.sleep(1)
+    time.sleep(2) # Supabaseへの負荷を考え少し間隔を空けます
